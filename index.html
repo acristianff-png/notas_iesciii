@@ -193,7 +193,10 @@
             <label>Data da visita</label>
             <input type="date" id="chamada-data">
           </div>
-          <div></div>
+          <div>
+            <label>Turma esperada nesta data</label>
+            <div id="chamada-turma-label" style="padding:10px 12px; font-weight:700; color:var(--afya-purple);"></div>
+          </div>
         </div>
         <table>
           <thead><tr><th>Aluno</th><th style="width:340px;">Status</th></tr></thead>
@@ -210,7 +213,7 @@
             <select id="sel-aluno"></select>
           </div>
           <div>
-            <label>Data da visita</label>
+            <label>Data da visita <span id="avaliacao-turma-label" class="muted"></span></label>
             <input type="date" id="inp-data-visita">
           </div>
         </div>
@@ -339,6 +342,20 @@ let EDITANDO_ID = null;      // id da avaliação em edição (preceptora)
 
 const CRITERIO_LABEL = {assiduidade:"Assiduidade", conhecimentos:"Conhecimentos e Habilidades", postura:"Postura e Colaboração"};
 
+/* Turma A/B alterna semana sim, semana não a partir desta data de referência
+   (08/09/2026 = Turma A, 15/09/2026 = Turma B, 22/09 = A novamente, ...).
+   Se o calendário letivo mudar, ajuste só esta linha. */
+const REFERENCE_DATE_A = new Date('2026-09-08T00:00:00');
+
+function grupoParaData(dataStr){
+  if(!dataStr) return null;
+  const d = new Date(dataStr + 'T00:00:00');
+  const diffDias = Math.round((d - REFERENCE_DATE_A) / 86400000);
+  const semanas = Math.floor(diffDias / 7);
+  const par = ((semanas % 2) + 2) % 2; // trata datas anteriores à referência também
+  return par === 0 ? 'A' : 'B';
+}
+
 /* ---------------------------- util ---------------------------- */
 function toast(msg, isErr){
   const t = document.getElementById('toast');
@@ -414,11 +431,12 @@ async function boot(){
 async function initPreceptora(){
   const { data: alunos } = await sb.from('alunos').select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('ativo', true).order('nome');
   MEUS_ALUNOS = alunos || [];
-  const sel = document.getElementById('sel-aluno');
-  sel.innerHTML = MEUS_ALUNOS.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
 
   document.getElementById('inp-data-visita').valueAsDate = new Date();
   document.getElementById('chamada-data').valueAsDate = new Date();
+
+  renderSelAlunoPorTurma();
+  document.getElementById('inp-data-visita').addEventListener('change', renderSelAlunoPorTurma);
 
   renderCriterioForm();
   await loadMinhasAvaliacoes();
@@ -430,6 +448,16 @@ async function initPreceptora(){
   document.getElementById('btn-salvar-chamada').addEventListener('click', salvarChamada);
 }
 
+function renderSelAlunoPorTurma(){
+  const data = document.getElementById('inp-data-visita').value;
+  const grupo = grupoParaData(data);
+  document.getElementById('avaliacao-turma-label').textContent = grupo ? `(Turma ${grupo})` : '';
+  const alunosDaTurma = MEUS_ALUNOS.filter(a => a.grupo === grupo);
+  const sel = document.getElementById('sel-aluno');
+  sel.innerHTML = alunosDaTurma.map(a => `<option value="${a.id}">${a.nome}</option>`).join('')
+    || '<option value="">Nenhum aluno desta turma nesta data</option>';
+}
+
 const PRESENCA_STATUS = [
   {v:'presente', label:'Presente'},
   {v:'ausente', label:'Ausente'},
@@ -439,6 +467,11 @@ let CHAMADA_SELECIONADA = {}; // aluno_id -> status
 
 async function renderChamada(){
   const data = document.getElementById('chamada-data').value;
+  const grupo = grupoParaData(data);
+  document.getElementById('chamada-turma-label').textContent = grupo ? `Turma ${grupo}` : '—';
+
+  const alunosDaTurma = MEUS_ALUNOS.filter(a => a.grupo === grupo);
+
   const { data: existentes } = await sb.from('presencas')
     .select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('data_visita', data);
 
@@ -446,7 +479,7 @@ async function renderChamada(){
   (existentes||[]).forEach(p => CHAMADA_SELECIONADA[p.aluno_id] = p.status);
 
   const tbody = document.getElementById('tbl-chamada');
-  tbody.innerHTML = MEUS_ALUNOS.map(a => `
+  tbody.innerHTML = alunosDaTurma.map(a => `
     <tr>
       <td>${a.nome}</td>
       <td>
@@ -454,7 +487,7 @@ async function renderChamada(){
           ${PRESENCA_STATUS.map(s => `<button type="button" class="${CHAMADA_SELECIONADA[a.id]===s.v ? 'sel-'+s.v : ''}" data-status="${s.v}">${s.label}</button>`).join('')}
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`).join('') || '<tr><td colspan="2" class="muted">Nenhum aluno cadastrado nesta turma.</td></tr>';
 
   tbody.querySelectorAll('.presenca-opts').forEach(group=>{
     group.querySelectorAll('button').forEach(btn=>{
@@ -571,8 +604,9 @@ window.editarAvaliacao = async function(id){
   const { data } = await sb.from('avaliacoes').select('*').eq('id', id).single();
   if(!data) return;
   EDITANDO_ID = id;
-  document.getElementById('sel-aluno').value = data.aluno_id;
   document.getElementById('inp-data-visita').value = data.data_visita;
+  renderSelAlunoPorTurma();
+  document.getElementById('sel-aluno').value = data.aluno_id;
   document.getElementById('inp-visita-numero').value = data.visita_numero || '';
 
   const map = {assiduidade:data.assiduidade_pontos, conhecimentos:data.conhecimentos_pontos, postura:data.postura_pontos};
