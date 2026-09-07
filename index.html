@@ -127,6 +127,17 @@
   .btn-sm.danger{color:var(--afya-danger);}
   .filters{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;}
   .filters select{width:auto; min-width:160px; margin-bottom:0;}
+  .relato-card{border:1.5px solid var(--afya-border); border-radius:12px; padding:16px 18px; margin-bottom:14px;}
+  .relato-card .relato-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;}
+  .relato-card .relato-head b{font-size:14px;}
+  .relato-card .relato-head .perc{font-size:12px; padding:3px 10px; border-radius:20px; background:var(--afya-bg); font-weight:700; color:var(--afya-purple);}
+  .relato-card .relato-field{margin-bottom:10px;}
+  .relato-card .relato-field label{margin-bottom:2px;}
+  .relato-card .relato-field p{margin:0; font-size:13px; color:var(--afya-text); white-space:pre-wrap;}
+  .relato-card .privado{background:rgba(91,44,134,0.045); border-radius:10px; padding:12px 14px; margin-top:12px;}
+  .relato-card .privado .tag-privado{font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--afya-purple); font-weight:700; margin-bottom:8px; display:block;}
+  .relato-card .privado .row2{gap:10px;}
+  .relato-card .privado select, .relato-card .privado textarea, .relato-card .privado input{margin-bottom:8px;}
   .toolbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;}
   .muted{color:var(--afya-muted); font-size:12.5px;}
   .hidden{display:none !important;}
@@ -238,6 +249,35 @@
           <tbody></tbody>
         </table>
       </div>
+
+      <div class="card">
+        <h2>Relato da semana</h2>
+        <p class="muted">Espaço livre pra contar como foi — não é uma nota sobre você, é o que nos ajuda a
+          entender o que está funcionando e onde a coordenação pode apoiar mais.</p>
+        <div class="row2">
+          <div>
+            <label>Semana de referência</label>
+            <input type="date" id="relato-data">
+          </div>
+          <div>
+            <label>Como você avalia a semana no geral?</label>
+            <select id="relato-percepcao">
+              <option value="5">5 — Ótima</option>
+              <option value="4">4 — Boa</option>
+              <option value="3">3 — Regular</option>
+              <option value="2">2 — Difícil</option>
+              <option value="1">1 — Muito difícil</option>
+            </select>
+          </div>
+        </div>
+        <label>O que funcionou bem essa semana?</label>
+        <textarea id="relato-positivos" placeholder="Ex: alunos engajados, boa articulação com a equipe..."></textarea>
+        <label>Quais foram os desafios ou dificuldades?</label>
+        <textarea id="relato-desafios" placeholder="Ex: falta de espaço físico, aluno com dificuldade específica..."></textarea>
+        <label>Alguma sugestão pra melhorar o processo?</label>
+        <textarea id="relato-sugestoes" placeholder="Opcional"></textarea>
+        <button class="btn-primary" id="btn-salvar-relato">Salvar relato</button>
+      </div>
     </div>
 
     <!-- ---------- VISÃO ADMIN ---------- -->
@@ -245,8 +285,22 @@
       <div class="tabs">
         <button class="tab-btn active" data-tab="tab-avaliacoes">Avaliações</button>
         <button class="tab-btn" data-tab="tab-presencas">Presenças</button>
+        <button class="tab-btn" data-tab="tab-acompanhamento">Acompanhamento</button>
         <button class="tab-btn" data-tab="tab-rubricas">Rubricas</button>
         <button class="tab-btn" data-tab="tab-preceptoras">Preceptoras</button>
+      </div>
+
+      <!-- Acompanhamento das preceptoras (privado) -->
+      <div id="tab-acompanhamento" class="tab-panel">
+        <div class="card">
+          <h2>Acompanhamento das preceptoras</h2>
+          <p class="muted">Os relatos abaixo são o que cada preceptora escreveu sobre a semana. As notas e
+            observações internas ficam visíveis só pra você — nunca aparecem pra elas.</p>
+          <div class="filters">
+            <select id="filtro-acomp-preceptora"><option value="">Todas as preceptoras</option></select>
+          </div>
+          <div id="lista-acompanhamento"></div>
+        </div>
       </div>
 
       <!-- Presenças consolidadas -->
@@ -446,6 +500,37 @@ async function initPreceptora(){
   await renderChamada();
   document.getElementById('chamada-data').addEventListener('change', renderChamada);
   document.getElementById('btn-salvar-chamada').addEventListener('click', salvarChamada);
+
+  document.getElementById('relato-data').valueAsDate = new Date();
+  document.getElementById('btn-salvar-relato').addEventListener('click', salvarRelato);
+  await carregarRelato();
+  document.getElementById('relato-data').addEventListener('change', carregarRelato);
+}
+
+async function carregarRelato(){
+  const data = document.getElementById('relato-data').value;
+  const { data: existente } = await sb.from('relatos_semanais')
+    .select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('data_referencia', data).maybeSingle();
+
+  document.getElementById('relato-positivos').value = existente?.pontos_positivos || '';
+  document.getElementById('relato-desafios').value = existente?.desafios || '';
+  document.getElementById('relato-sugestoes').value = existente?.sugestoes || '';
+  document.getElementById('relato-percepcao').value = existente?.percepcao_geral || '5';
+}
+
+async function salvarRelato(){
+  const data_referencia = document.getElementById('relato-data').value;
+  const payload = {
+    preceptora_id: MY_PRECEPTORA.id,
+    data_referencia,
+    pontos_positivos: document.getElementById('relato-positivos').value || null,
+    desafios: document.getElementById('relato-desafios').value || null,
+    sugestoes: document.getElementById('relato-sugestoes').value || null,
+    percepcao_geral: parseInt(document.getElementById('relato-percepcao').value, 10)
+  };
+  const { error } = await sb.from('relatos_semanais').upsert(payload, { onConflict: 'preceptora_id,data_referencia' });
+  if(error){ toast("Erro ao salvar relato: " + error.message, true); return; }
+  toast("Relato salvo. Obrigado por compartilhar!");
 }
 
 function renderSelAlunoPorTurma(){
@@ -652,7 +737,77 @@ function initAdmin(){
   document.getElementById('btn-export-presencas-csv').addEventListener('click', exportarPresencasCSV);
   document.getElementById('filtro-presenca-ubs').addEventListener('change', loadAdminPresencas);
   document.getElementById('filtro-presenca-preceptora').addEventListener('change', loadAdminPresencas);
+
+  loadAcompanhamento();
+  document.getElementById('filtro-acomp-preceptora').addEventListener('change', loadAcompanhamento);
 }
+
+async function loadAcompanhamento(){
+  const { data: relatos, error } = await sb.from('relatos_semanais')
+    .select('*, preceptoras(nome, ubs)')
+    .order('data_referencia', {ascending:false});
+  if(error){ toast("Erro ao carregar relatos: " + error.message, true); return; }
+
+  const { data: acompanhamentos } = await sb.from('acompanhamento_preceptoras').select('*');
+  const mapAcomp = {};
+  (acompanhamentos||[]).forEach(a => mapAcomp[a.preceptora_id + '|' + a.data_referencia] = a);
+
+  const selPrec = document.getElementById('filtro-acomp-preceptora');
+  if(selPrec.options.length <= 1){
+    new Set((relatos||[]).map(r=>r.preceptoras?.nome).filter(Boolean))
+      .forEach(p => selPrec.innerHTML += `<option value="${p}">${p}</option>`);
+  }
+  const fPrec = selPrec.value;
+  const filtrados = (relatos||[]).filter(r => !fPrec || r.preceptoras?.nome === fPrec);
+
+  const PERC_LABEL = {5:'Ótima', 4:'Boa', 3:'Regular', 2:'Difícil', 1:'Muito difícil'};
+  const container = document.getElementById('lista-acompanhamento');
+  container.innerHTML = filtrados.map(r=>{
+    const key = r.preceptora_id + '|' + r.data_referencia;
+    const acomp = mapAcomp[key] || {};
+    return `
+    <div class="relato-card" data-preceptora="${r.preceptora_id}" data-data="${r.data_referencia}">
+      <div class="relato-head">
+        <b>${r.preceptoras?.nome ?? ''} · ${r.preceptoras?.ubs ?? ''}</b>
+        <span class="perc">${new Date(r.data_referencia+'T00:00:00').toLocaleDateString('pt-BR')} · Semana: ${PERC_LABEL[r.percepcao_geral] || '—'}</span>
+      </div>
+      <div class="relato-field"><label>O que funcionou bem</label><p>${r.pontos_positivos || '—'}</p></div>
+      <div class="relato-field"><label>Desafios</label><p>${r.desafios || '—'}</p></div>
+      <div class="relato-field"><label>Sugestões</label><p>${r.sugestoes || '—'}</p></div>
+
+      <div class="privado">
+        <span class="tag-privado">Acompanhamento interno (só você vê)</span>
+        <div class="row2">
+          <div>
+            <label>Nota de desempenho (1–5)</label>
+            <select class="acomp-nota">
+              <option value="">—</option>
+              ${[5,4,3,2,1].map(n=>`<option value="${n}" ${acomp.nota_desempenho==n?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div></div>
+        </div>
+        <label>Observação interna</label>
+        <textarea class="acomp-obs" placeholder="Suas anotações sobre o desempenho dela nessa semana...">${acomp.observacao_interna || ''}</textarea>
+        <button class="btn-sm" onclick="salvarAcompanhamento('${r.preceptora_id}', '${r.data_referencia}', this)">Salvar</button>
+      </div>
+    </div>`;
+  }).join('') || '<p class="muted">Nenhum relato enviado ainda.</p>';
+}
+
+window.salvarAcompanhamento = async function(preceptora_id, data_referencia, btn){
+  const card = btn.closest('.relato-card');
+  const nota = card.querySelector('.acomp-nota').value;
+  const obs = card.querySelector('.acomp-obs').value;
+  const payload = {
+    preceptora_id, data_referencia,
+    nota_desempenho: nota ? parseInt(nota,10) : null,
+    observacao_interna: obs || null
+  };
+  const { error } = await sb.from('acompanhamento_preceptoras').upsert(payload, { onConflict: 'preceptora_id,data_referencia' });
+  if(error){ toast("Erro ao salvar: " + error.message, true); return; }
+  toast("Acompanhamento salvo.");
+};
 
 const STATUS_LABEL = {presente:'Presente', ausente:'Ausente', justificado:'Justificado'};
 const STATUS_BADGE = {presente:'ok', ausente:'', justificado:''};
