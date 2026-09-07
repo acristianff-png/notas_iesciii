@@ -149,9 +149,10 @@
   <div class="login-card">
     <div class="logo-mark">A</div>
     <h1>Avaliação de Estágio</h1>
-    <p>IESC III — Afya Contagem<br>Entre com seu e-mail cadastrado</p>
+    <p>IESC III — Afya Contagem<br>Entre com seu e-mail e senha</p>
     <input type="email" id="login-email" placeholder="seu.email@exemplo.com" autocomplete="email">
-    <button class="btn-primary" id="btn-login">Enviar link de acesso</button>
+    <input type="password" id="login-senha" placeholder="Senha" autocomplete="current-password">
+    <button class="btn-primary" id="btn-login">Entrar</button>
     <div id="login-msg" class="login-msg"></div>
   </div>
 </div>
@@ -165,6 +166,7 @@
     </div>
     <div class="who">
       <span id="who-label"></span>
+      <button class="logout" id="btn-trocar-senha">Trocar senha</button>
       <button class="logout" id="btn-logout">Sair</button>
     </div>
   </div>
@@ -277,8 +279,8 @@
 /* =======================================================================
    CONFIGURAÇÃO — troque pelos dados do seu projeto Supabase
    ======================================================================= */
-const SUPABASE_URL = "https://SEU-PROJETO.supabase.co";
-const SUPABASE_ANON_KEY = "SUA_ANON_KEY_AQUI";
+const SUPABASE_URL = "https://baovebzbbakuldnaxcqg.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_tLl96E8cG8vsvY59_gHBVw_yMjQldp_";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -302,21 +304,33 @@ function toast(msg, isErr){
 function fmt(n){ return Number(n).toFixed(1).replace('.', ','); }
 
 /* ---------------------------- auth ---------------------------- */
-document.getElementById('btn-login').addEventListener('click', async ()=>{
+document.getElementById('btn-login').addEventListener('click', fazerLogin);
+document.getElementById('login-senha').addEventListener('keydown', (e)=>{ if(e.key==='Enter') fazerLogin(); });
+
+async function fazerLogin(){
   const email = document.getElementById('login-email').value.trim();
+  const senha = document.getElementById('login-senha').value;
   const msg = document.getElementById('login-msg');
-  if(!email){ msg.textContent = "Digite seu e-mail."; msg.className="login-msg err"; return; }
+  if(!email || !senha){ msg.textContent = "Preencha e-mail e senha."; msg.className="login-msg err"; return; }
   document.getElementById('btn-login').disabled = true;
-  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: window.location.href } });
+  const { error } = await sb.auth.signInWithPassword({ email, password: senha });
   document.getElementById('btn-login').disabled = false;
-  if(error){ msg.textContent = "Erro ao enviar link: " + error.message; msg.className="login-msg err"; return; }
-  msg.textContent = "Link enviado! Confira sua caixa de entrada (e o spam).";
-  msg.className = "login-msg ok";
-});
+  if(error){ msg.textContent = "E-mail ou senha incorretos."; msg.className="login-msg err"; return; }
+  msg.textContent = ""; msg.className = "login-msg";
+}
 
 document.getElementById('btn-logout').addEventListener('click', async ()=>{
   await sb.auth.signOut();
   window.location.reload();
+});
+
+document.getElementById('btn-trocar-senha').addEventListener('click', async ()=>{
+  const nova = prompt("Digite a nova senha (mínimo 6 caracteres):");
+  if(!nova) return;
+  if(nova.length < 6){ toast("A senha precisa ter pelo menos 6 caracteres.", true); return; }
+  const { error } = await sb.auth.updateUser({ password: nova });
+  if(error){ toast("Erro ao trocar senha: " + error.message, true); return; }
+  toast("Senha atualizada com sucesso.");
 });
 
 sb.auth.onAuthStateChange((event, session)=>{
