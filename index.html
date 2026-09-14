@@ -195,6 +195,11 @@
     <!-- ---------- VISÃO PRECEPTORA ---------- -->
     <div id="preceptora-view" class="hidden">
 
+      <div class="card" id="card-modulo" style="padding:16px 24px;">
+        <label style="margin-bottom:6px;">Módulo</label>
+        <select id="sel-modulo" style="max-width:260px; margin-bottom:0;"></select>
+      </div>
+
       <div class="card">
         <div class="toolbar">
           <h2 style="margin:0;">Chamada</h2>
@@ -298,6 +303,7 @@
             observações internas ficam visíveis só pra você — nunca aparecem pra elas.</p>
           <div class="filters">
             <select id="filtro-acomp-preceptora"><option value="">Todas as preceptoras</option></select>
+            <select id="filtro-acomp-modulo"><option value="">Todos os módulos</option></select>
           </div>
           <div id="lista-acompanhamento"></div>
         </div>
@@ -313,9 +319,10 @@
           <div class="filters">
             <select id="filtro-presenca-ubs"><option value="">Todas as UBS</option></select>
             <select id="filtro-presenca-preceptora"><option value="">Todas as preceptoras</option></select>
+            <select id="filtro-presenca-modulo"><option value="">Todos os módulos</option></select>
           </div>
           <table id="tbl-admin-presencas">
-            <thead><tr><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th><th>Status</th><th>Observação</th></tr></thead>
+            <thead><tr><th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th><th>Status</th><th>Observação</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -331,10 +338,11 @@
           <div class="filters">
             <select id="filtro-ubs"><option value="">Todas as UBS</option></select>
             <select id="filtro-preceptora"><option value="">Todas as preceptoras</option></select>
+            <select id="filtro-modulo"><option value="">Todos os módulos</option></select>
           </div>
           <table id="tbl-admin-avaliacoes">
             <thead><tr>
-              <th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th>
+              <th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th>
               <th>Assid.</th><th>Conh.</th><th>Postura</th><th>Total</th><th></th>
             </tr></thead>
             <tbody></tbody>
@@ -347,6 +355,8 @@
         <div class="card">
           <h2>Configurar pontuação das rubricas</h2>
           <p class="muted">Altere a descrição e/ou a pontuação de qualquer nível. Avaliações já lançadas mantêm a nota registrada no momento do envio — a mudança vale para os próximos lançamentos.</p>
+
+          <div class="tabs" id="tabs-modulo-rubrica" style="margin-bottom:10px;"></div>
 
           <h3>1. Assiduidade</h3>
           <table><tbody id="rub-assiduidade"></tbody></table>
@@ -365,7 +375,7 @@
           <h2>Preceptoras cadastradas</h2>
           <p class="muted">Cadastre o e-mail institucional de cada preceptora — é com ele que ela recebe o link de acesso.</p>
           <table>
-            <thead><tr><th>Nome</th><th>UBS</th><th>E-mail</th><th></th></tr></thead>
+            <thead><tr><th>Nome</th><th>UBS</th><th>Módulos</th><th>E-mail</th><th></th></tr></thead>
             <tbody id="tbl-preceptoras"></tbody>
           </table>
         </div>
@@ -395,16 +405,24 @@ let SELECIONADOS = {assiduidade:null, conhecimentos:null, postura:null};
 let EDITANDO_ID = null;      // id da avaliação em edição (preceptora)
 
 const CRITERIO_LABEL = {assiduidade:"Assiduidade", conhecimentos:"Conhecimentos e Habilidades", postura:"Postura e Colaboração"};
+const MODULOS_ORDEM = ['IESC I','IESC II','IESC III'];
+let CURRENT_MODULO = null;
+let MEUS_MODULOS = [];
 
-/* Turma A/B alterna semana sim, semana não a partir desta data de referência
-   (08/09/2026 = Turma A, 15/09/2026 = Turma B, 22/09 = A novamente, ...).
-   Se o calendário letivo mudar, ajuste só esta linha. */
-const REFERENCE_DATE_A = new Date('2026-09-08T00:00:00');
+/* Turma A/B alterna semana sim, semana não a partir da data de referência
+   de cada módulo — dia da semana e data de início variam por módulo.
+   IESC II: data assumida (02/09/2026), sem confirmação do calendário oficial. */
+const REFERENCE_DATES = {
+  'IESC I':   '2026-09-04',  // sexta-feira
+  'IESC II':  '2026-09-02',  // quarta-feira — ASSUMIDO, confirmar
+  'IESC III': '2026-09-08'   // terça-feira
+};
 
-function grupoParaData(dataStr){
-  if(!dataStr) return null;
+function grupoParaData(dataStr, modulo){
+  if(!dataStr || !modulo) return null;
+  const ref = new Date(REFERENCE_DATES[modulo] + 'T00:00:00');
   const d = new Date(dataStr + 'T00:00:00');
-  const diffDias = Math.round((d - REFERENCE_DATE_A) / 86400000);
+  const diffDias = Math.round((d - ref) / 86400000);
   const semanas = Math.floor(diffDias / 7);
   const par = ((semanas % 2) + 2) % 2; // trata datas anteriores à referência também
   return par === 0 ? 'A' : 'B';
@@ -474,7 +492,6 @@ async function boot(){
     }
     MY_PRECEPTORA = prec;
     document.getElementById('preceptora-view').classList.remove('hidden');
-    document.getElementById('topbar-sub').textContent = prec.ubs;
     initPreceptora();
   }
 }
@@ -486,31 +503,53 @@ async function initPreceptora(){
   const { data: alunos } = await sb.from('alunos').select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('ativo', true).order('nome');
   MEUS_ALUNOS = alunos || [];
 
+  MEUS_MODULOS = MODULOS_ORDEM.filter(m => MEUS_ALUNOS.some(a => a.modulo === m));
+  if(!MEUS_MODULOS.length) MEUS_MODULOS = ['IESC III'];
+  CURRENT_MODULO = MEUS_MODULOS[0];
+
+  const ubsList = [...new Set(MEUS_ALUNOS.map(a=>a.ubs))].join(' · ');
+  document.getElementById('topbar-sub').textContent = ubsList || (MY_PRECEPTORA.ubs || '');
+
+  const selModulo = document.getElementById('sel-modulo');
+  selModulo.innerHTML = MEUS_MODULOS.map(m => `<option value="${m}">${m}</option>`).join('');
+  document.getElementById('card-modulo').classList.toggle('hidden', MEUS_MODULOS.length <= 1);
+  selModulo.addEventListener('change', async ()=>{
+    CURRENT_MODULO = selModulo.value;
+    await onModuloChange();
+  });
+
   document.getElementById('inp-data-visita').valueAsDate = new Date();
   document.getElementById('chamada-data').valueAsDate = new Date();
+  document.getElementById('relato-data').valueAsDate = new Date();
 
-  renderSelAlunoPorTurma();
+  await onModuloChange();
+
   document.getElementById('inp-data-visita').addEventListener('change', renderSelAlunoPorTurma);
-
-  renderCriterioForm();
-  await loadMinhasAvaliacoes();
-
   document.getElementById('btn-salvar-avaliacao').addEventListener('click', salvarAvaliacao);
-
-  await renderChamada();
   document.getElementById('chamada-data').addEventListener('change', renderChamada);
   document.getElementById('btn-salvar-chamada').addEventListener('click', salvarChamada);
-
-  document.getElementById('relato-data').valueAsDate = new Date();
   document.getElementById('btn-salvar-relato').addEventListener('click', salvarRelato);
-  await carregarRelato();
   document.getElementById('relato-data').addEventListener('change', carregarRelato);
+}
+
+// Chamado sempre que o módulo muda (ou no boot inicial) — recarrega tudo
+// que depende de qual conjunto de alunos/rubrica está ativo.
+async function onModuloChange(){
+  renderSelAlunoPorTurma();
+  renderCriterioForm();
+  await loadMinhasAvaliacoes();
+  await renderChamada();
+  await carregarRelato();
+}
+
+function alunosDoModuloAtual(){
+  return MEUS_ALUNOS.filter(a => a.modulo === CURRENT_MODULO);
 }
 
 async function carregarRelato(){
   const data = document.getElementById('relato-data').value;
   const { data: existente } = await sb.from('relatos_semanais')
-    .select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('data_referencia', data).maybeSingle();
+    .select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('modulo', CURRENT_MODULO).eq('data_referencia', data).maybeSingle();
 
   document.getElementById('relato-positivos').value = existente?.pontos_positivos || '';
   document.getElementById('relato-desafios').value = existente?.desafios || '';
@@ -522,22 +561,23 @@ async function salvarRelato(){
   const data_referencia = document.getElementById('relato-data').value;
   const payload = {
     preceptora_id: MY_PRECEPTORA.id,
+    modulo: CURRENT_MODULO,
     data_referencia,
     pontos_positivos: document.getElementById('relato-positivos').value || null,
     desafios: document.getElementById('relato-desafios').value || null,
     sugestoes: document.getElementById('relato-sugestoes').value || null,
     percepcao_geral: parseInt(document.getElementById('relato-percepcao').value, 10)
   };
-  const { error } = await sb.from('relatos_semanais').upsert(payload, { onConflict: 'preceptora_id,data_referencia' });
+  const { error } = await sb.from('relatos_semanais').upsert(payload, { onConflict: 'preceptora_id,modulo,data_referencia' });
   if(error){ toast("Erro ao salvar relato: " + error.message, true); return; }
   toast("Relato salvo. Obrigado por compartilhar!");
 }
 
 function renderSelAlunoPorTurma(){
   const data = document.getElementById('inp-data-visita').value;
-  const grupo = grupoParaData(data);
+  const grupo = grupoParaData(data, CURRENT_MODULO);
   document.getElementById('avaliacao-turma-label').textContent = grupo ? `(Turma ${grupo})` : '';
-  const alunosDaTurma = MEUS_ALUNOS.filter(a => a.grupo === grupo);
+  const alunosDaTurma = alunosDoModuloAtual().filter(a => !a.grupo || a.grupo === grupo);
   const sel = document.getElementById('sel-aluno');
   sel.innerHTML = alunosDaTurma.map(a => `<option value="${a.id}">${a.nome}</option>`).join('')
     || '<option value="">Nenhum aluno desta turma nesta data</option>';
@@ -552,10 +592,10 @@ let CHAMADA_SELECIONADA = {}; // aluno_id -> status
 
 async function renderChamada(){
   const data = document.getElementById('chamada-data').value;
-  const grupo = grupoParaData(data);
+  const grupo = grupoParaData(data, CURRENT_MODULO);
   document.getElementById('chamada-turma-label').textContent = grupo ? `Turma ${grupo}` : '—';
 
-  const alunosDaTurma = MEUS_ALUNOS.filter(a => a.grupo === grupo);
+  const alunosDaTurma = alunosDoModuloAtual().filter(a => !a.grupo || a.grupo === grupo);
 
   const { data: existentes } = await sb.from('presencas')
     .select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('data_visita', data);
@@ -603,7 +643,7 @@ function renderCriterioForm(){
   const container = document.getElementById('form-criterios');
   container.innerHTML = '';
   ['assiduidade','conhecimentos','postura'].forEach(crit=>{
-    const opts = RUBRICAS.filter(r=>r.criterio===crit).sort((a,b)=>a.ordem-b.ordem);
+    const opts = RUBRICAS.filter(r=>r.criterio===crit && r.modulo===CURRENT_MODULO).sort((a,b)=>a.ordem-b.ordem);
     const block = document.createElement('div');
     block.innerHTML = `<h3>${CRITERIO_LABEL[crit]} (máx ${fmt(Math.max(...opts.map(o=>o.pontos)))} pts)</h3>
       <div class="criterio-opts" id="opts-${crit}">
@@ -671,12 +711,14 @@ async function salvarAvaliacao(){
 
 async function loadMinhasAvaliacoes(){
   const { data } = await sb.from('avaliacoes')
-    .select('*, alunos(nome)')
+    .select('*, alunos(nome, modulo)')
     .eq('preceptora_id', MY_PRECEPTORA.id)
     .order('data_visita', {ascending:false});
 
+  const doModulo = (data||[]).filter(a => a.alunos?.modulo === CURRENT_MODULO);
+
   const tbody = document.querySelector('#tbl-minhas-avaliacoes tbody');
-  tbody.innerHTML = (data||[]).map(a=>`
+  tbody.innerHTML = doModulo.map(a=>`
     <tr>
       <td>${a.alunos?.nome ?? ''}</td>
       <td>${new Date(a.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
@@ -696,7 +738,7 @@ window.editarAvaliacao = async function(id){
 
   const map = {assiduidade:data.assiduidade_pontos, conhecimentos:data.conhecimentos_pontos, postura:data.postura_pontos};
   ['assiduidade','conhecimentos','postura'].forEach(crit=>{
-    const r = RUBRICAS.filter(x=>x.criterio===crit).find(x=>Number(x.pontos)===Number(map[crit]));
+    const r = RUBRICAS.filter(x=>x.criterio===crit && x.modulo===CURRENT_MODULO).find(x=>Number(x.pontos)===Number(map[crit]));
     if(r){
       SELECIONADOS[crit] = r.id;
       document.querySelectorAll(`#opts-${crit} .opt`).forEach(o=>o.classList.toggle('selected', o.dataset.id===r.id));
@@ -724,6 +766,17 @@ function initAdmin(){
     });
   });
 
+  ADMIN_RUBRICA_MODULO = MODULOS_ORDEM[0];
+  const tabsModulo = document.getElementById('tabs-modulo-rubrica');
+  tabsModulo.innerHTML = MODULOS_ORDEM.map((m,i)=>`<button type="button" class="tab-btn${i===0?' active':''}" data-modulo="${m}">${m}</button>`).join('');
+  tabsModulo.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      tabsModulo.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      ADMIN_RUBRICA_MODULO = btn.dataset.modulo;
+      renderRubricasAdmin();
+    });
+  });
   renderRubricasAdmin();
   document.getElementById('btn-salvar-rubricas').addEventListener('click', salvarRubricas);
 
@@ -732,15 +785,20 @@ function initAdmin(){
   document.getElementById('btn-export-csv').addEventListener('click', exportarCSV);
   document.getElementById('filtro-ubs').addEventListener('change', loadAdminAvaliacoes);
   document.getElementById('filtro-preceptora').addEventListener('change', loadAdminAvaliacoes);
+  document.getElementById('filtro-modulo').addEventListener('change', loadAdminAvaliacoes);
 
   loadAdminPresencas();
   document.getElementById('btn-export-presencas-csv').addEventListener('click', exportarPresencasCSV);
   document.getElementById('filtro-presenca-ubs').addEventListener('change', loadAdminPresencas);
   document.getElementById('filtro-presenca-preceptora').addEventListener('change', loadAdminPresencas);
+  document.getElementById('filtro-presenca-modulo').addEventListener('change', loadAdminPresencas);
 
   loadAcompanhamento();
   document.getElementById('filtro-acomp-preceptora').addEventListener('change', loadAcompanhamento);
+  document.getElementById('filtro-acomp-modulo').addEventListener('change', loadAcompanhamento);
 }
+
+let ADMIN_RUBRICA_MODULO = null;
 
 async function loadAcompanhamento(){
   const { data: relatos, error } = await sb.from('relatos_semanais')
@@ -750,25 +808,28 @@ async function loadAcompanhamento(){
 
   const { data: acompanhamentos } = await sb.from('acompanhamento_preceptoras').select('*');
   const mapAcomp = {};
-  (acompanhamentos||[]).forEach(a => mapAcomp[a.preceptora_id + '|' + a.data_referencia] = a);
+  (acompanhamentos||[]).forEach(a => mapAcomp[a.preceptora_id + '|' + a.modulo + '|' + a.data_referencia] = a);
 
   const selPrec = document.getElementById('filtro-acomp-preceptora');
+  const selMod = document.getElementById('filtro-acomp-modulo');
   if(selPrec.options.length <= 1){
     new Set((relatos||[]).map(r=>r.preceptoras?.nome).filter(Boolean))
       .forEach(p => selPrec.innerHTML += `<option value="${p}">${p}</option>`);
   }
-  const fPrec = selPrec.value;
-  const filtrados = (relatos||[]).filter(r => !fPrec || r.preceptoras?.nome === fPrec);
+  if(selMod.options.length <= 1){ MODULOS_ORDEM.forEach(m=> selMod.innerHTML += `<option value="${m}">${m}</option>`); }
+
+  const fPrec = selPrec.value, fMod = selMod.value;
+  const filtrados = (relatos||[]).filter(r => (!fPrec || r.preceptoras?.nome === fPrec) && (!fMod || r.modulo === fMod));
 
   const PERC_LABEL = {5:'Ótima', 4:'Boa', 3:'Regular', 2:'Difícil', 1:'Muito difícil'};
   const container = document.getElementById('lista-acompanhamento');
   container.innerHTML = filtrados.map(r=>{
-    const key = r.preceptora_id + '|' + r.data_referencia;
+    const key = r.preceptora_id + '|' + r.modulo + '|' + r.data_referencia;
     const acomp = mapAcomp[key] || {};
     return `
-    <div class="relato-card" data-preceptora="${r.preceptora_id}" data-data="${r.data_referencia}">
+    <div class="relato-card" data-preceptora="${r.preceptora_id}" data-modulo="${r.modulo}" data-data="${r.data_referencia}">
       <div class="relato-head">
-        <b>${r.preceptoras?.nome ?? ''} · ${r.preceptoras?.ubs ?? ''}</b>
+        <b>${r.preceptoras?.nome ?? ''} · ${r.preceptoras?.ubs ?? ''} · ${r.modulo}</b>
         <span class="perc">${new Date(r.data_referencia+'T00:00:00').toLocaleDateString('pt-BR')} · Semana: ${PERC_LABEL[r.percepcao_geral] || '—'}</span>
       </div>
       <div class="relato-field"><label>O que funcionou bem</label><p>${r.pontos_positivos || '—'}</p></div>
@@ -789,22 +850,22 @@ async function loadAcompanhamento(){
         </div>
         <label>Observação interna</label>
         <textarea class="acomp-obs" placeholder="Suas anotações sobre o desempenho dela nessa semana...">${acomp.observacao_interna || ''}</textarea>
-        <button class="btn-sm" onclick="salvarAcompanhamento('${r.preceptora_id}', '${r.data_referencia}', this)">Salvar</button>
+        <button class="btn-sm" onclick="salvarAcompanhamento('${r.preceptora_id}', '${r.modulo}', '${r.data_referencia}', this)">Salvar</button>
       </div>
     </div>`;
   }).join('') || '<p class="muted">Nenhum relato enviado ainda.</p>';
 }
 
-window.salvarAcompanhamento = async function(preceptora_id, data_referencia, btn){
+window.salvarAcompanhamento = async function(preceptora_id, modulo, data_referencia, btn){
   const card = btn.closest('.relato-card');
   const nota = card.querySelector('.acomp-nota').value;
   const obs = card.querySelector('.acomp-obs').value;
   const payload = {
-    preceptora_id, data_referencia,
+    preceptora_id, modulo, data_referencia,
     nota_desempenho: nota ? parseInt(nota,10) : null,
     observacao_interna: obs || null
   };
-  const { error } = await sb.from('acompanhamento_preceptoras').upsert(payload, { onConflict: 'preceptora_id,data_referencia' });
+  const { error } = await sb.from('acompanhamento_preceptoras').upsert(payload, { onConflict: 'preceptora_id,modulo,data_referencia' });
   if(error){ toast("Erro ao salvar: " + error.message, true); return; }
   toast("Acompanhamento salvo.");
 };
@@ -814,43 +875,47 @@ const STATUS_BADGE = {presente:'ok', ausente:'', justificado:''};
 
 async function loadAdminPresencas(){
   const { data, error } = await sb.from('presencas')
-    .select('*, alunos(nome, ubs), preceptoras(nome, ubs)')
+    .select('*, alunos(nome, ubs, modulo), preceptoras(nome, ubs)')
     .order('data_visita', {ascending:false});
   if(error){ toast("Erro ao carregar presenças: " + error.message, true); return; }
 
-  const ubsSet = new Set((data||[]).map(a=>a.preceptoras?.ubs).filter(Boolean));
+  const ubsSet = new Set((data||[]).map(a=>a.alunos?.ubs).filter(Boolean));
   const precSet = new Set((data||[]).map(a=>a.preceptoras?.nome).filter(Boolean));
   const selUbs = document.getElementById('filtro-presenca-ubs');
   const selPrec = document.getElementById('filtro-presenca-preceptora');
+  const selMod = document.getElementById('filtro-presenca-modulo');
   if(selUbs.options.length <= 1){ ubsSet.forEach(u=> selUbs.innerHTML += `<option value="${u}">${u}</option>`); }
   if(selPrec.options.length <= 1){ precSet.forEach(p=> selPrec.innerHTML += `<option value="${p}">${p}</option>`); }
+  if(selMod.options.length <= 1){ MODULOS_ORDEM.forEach(m=> selMod.innerHTML += `<option value="${m}">${m}</option>`); }
 
-  const fUbs = selUbs.value, fPrec = selPrec.value;
+  const fUbs = selUbs.value, fPrec = selPrec.value, fMod = selMod.value;
   const filtered = (data||[]).filter(a =>
-    (!fUbs || a.preceptoras?.ubs === fUbs) && (!fPrec || a.preceptoras?.nome === fPrec)
+    (!fUbs || a.alunos?.ubs === fUbs) && (!fPrec || a.preceptoras?.nome === fPrec) &&
+    (!fMod || a.alunos?.modulo === fMod)
   );
   window.__ADMIN_PRESENCAS__ = filtered;
 
   const tbody = document.querySelector('#tbl-admin-presencas tbody');
   tbody.innerHTML = filtered.map(p=>`
     <tr>
-      <td>${p.preceptoras?.ubs ?? ''}</td>
+      <td>${p.alunos?.modulo ?? ''}</td>
+      <td>${p.alunos?.ubs ?? ''}</td>
       <td>${p.preceptoras?.nome ?? ''}</td>
       <td>${p.alunos?.nome ?? ''}</td>
       <td>${new Date(p.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
       <td><span class="badge ${p.status==='presente'?'ok':''}">${STATUS_LABEL[p.status]}</span></td>
       <td>${p.observacao || ''}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhuma chamada lançada ainda.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhuma chamada lançada ainda.</td></tr>';
 }
 
 function exportarPresencasCSV(){
   const rows = window.__ADMIN_PRESENCAS__ || [];
   if(!rows.length){ toast("Nada para exportar.", true); return; }
-  const header = ['UBS','Preceptora','Aluno','Data','Status','Observação'];
+  const header = ['Módulo','UBS','Preceptora','Aluno','Data','Status','Observação'];
   const lines = [header.join(';')];
   rows.forEach(p=>{
     lines.push([
-      p.preceptoras?.ubs, p.preceptoras?.nome, p.alunos?.nome,
+      p.alunos?.modulo, p.alunos?.ubs, p.preceptoras?.nome, p.alunos?.nome,
       new Date(p.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
       STATUS_LABEL[p.status], p.observacao || ''
     ].join(';'));
@@ -865,7 +930,7 @@ function exportarPresencasCSV(){
 function renderRubricasAdmin(){
   ['assiduidade','conhecimentos','postura'].forEach(crit=>{
     const tbody = document.getElementById('rub-' + crit);
-    const rows = RUBRICAS.filter(r=>r.criterio===crit).sort((a,b)=>a.ordem-b.ordem);
+    const rows = RUBRICAS.filter(r=>r.criterio===crit && r.modulo===ADMIN_RUBRICA_MODULO).sort((a,b)=>a.ordem-b.ordem);
     tbody.innerHTML = rows.map(r=>`
       <tr class="rubrica-row" data-id="${r.id}">
         <td style="width:70%;"><input type="text" value="${r.descricao.replace(/"/g,'&quot;')}" class="rub-desc"></td>
@@ -895,23 +960,26 @@ async function salvarRubricas(){
 
 async function loadAdminAvaliacoes(){
   let query = sb.from('avaliacoes')
-    .select('*, alunos(nome, ubs), preceptoras(nome, ubs, email)')
+    .select('*, alunos(nome, ubs, modulo), preceptoras(nome, ubs, email)')
     .order('data_visita', {ascending:false});
 
   const { data, error } = await query;
   if(error){ toast("Erro ao carregar avaliações: " + error.message, true); return; }
 
-  const ubsSet = new Set((data||[]).map(a=>a.preceptoras?.ubs).filter(Boolean));
+  const ubsSet = new Set((data||[]).map(a=>a.alunos?.ubs).filter(Boolean));
   const precSet = new Set((data||[]).map(a=>a.preceptoras?.nome).filter(Boolean));
 
   const selUbs = document.getElementById('filtro-ubs');
   const selPrec = document.getElementById('filtro-preceptora');
+  const selMod = document.getElementById('filtro-modulo');
   if(selUbs.options.length <= 1){ ubsSet.forEach(u=> selUbs.innerHTML += `<option value="${u}">${u}</option>`); }
   if(selPrec.options.length <= 1){ precSet.forEach(p=> selPrec.innerHTML += `<option value="${p}">${p}</option>`); }
+  if(selMod.options.length <= 1){ MODULOS_ORDEM.forEach(m=> selMod.innerHTML += `<option value="${m}">${m}</option>`); }
 
-  const fUbs = selUbs.value, fPrec = selPrec.value;
+  const fUbs = selUbs.value, fPrec = selPrec.value, fMod = selMod.value;
   const filtered = (data||[]).filter(a =>
-    (!fUbs || a.preceptoras?.ubs === fUbs) && (!fPrec || a.preceptoras?.nome === fPrec)
+    (!fUbs || a.alunos?.ubs === fUbs) && (!fPrec || a.preceptoras?.nome === fPrec) &&
+    (!fMod || a.alunos?.modulo === fMod)
   );
 
   window.__ADMIN_AVALIACOES__ = filtered;
@@ -919,7 +987,8 @@ async function loadAdminAvaliacoes(){
   const tbody = document.querySelector('#tbl-admin-avaliacoes tbody');
   tbody.innerHTML = filtered.map(a=>`
     <tr>
-      <td>${a.preceptoras?.ubs ?? ''}</td>
+      <td>${a.alunos?.modulo ?? ''}</td>
+      <td>${a.alunos?.ubs ?? ''}</td>
       <td>${a.preceptoras?.nome ?? ''}</td>
       <td>${a.alunos?.nome ?? ''}</td>
       <td>${new Date(a.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
@@ -928,7 +997,7 @@ async function loadAdminAvaliacoes(){
       <td>${fmt(a.postura_pontos)}</td>
       <td><span class="badge ok">${fmt(a.nota_total)}</span></td>
       <td><button class="btn-sm" onclick="adminEditarAvaliacao('${a.id}')">Ajustar</button></td>
-    </tr>`).join('') || '<tr><td colspan="9" class="muted">Nenhuma avaliação lançada ainda.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="10" class="muted">Nenhuma avaliação lançada ainda.</td></tr>';
 }
 
 window.adminEditarAvaliacao = async function(id){
@@ -955,11 +1024,11 @@ window.adminEditarAvaliacao = async function(id){
 function exportarCSV(){
   const rows = window.__ADMIN_AVALIACOES__ || [];
   if(!rows.length){ toast("Nada para exportar.", true); return; }
-  const header = ['UBS','Preceptora','Aluno','Data','Assiduidade','Conhecimentos','Postura','Nota Total','Visita Nº'];
+  const header = ['Módulo','UBS','Preceptora','Aluno','Data','Assiduidade','Conhecimentos','Postura','Nota Total','Visita Nº'];
   const lines = [header.join(';')];
   rows.forEach(a=>{
     lines.push([
-      a.preceptoras?.ubs, a.preceptoras?.nome, a.alunos?.nome,
+      a.alunos?.modulo, a.alunos?.ubs, a.preceptoras?.nome, a.alunos?.nome,
       new Date(a.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
       fmt(a.assiduidade_pontos), fmt(a.conhecimentos_pontos), fmt(a.postura_pontos),
       fmt(a.nota_total), a.visita_numero || ''
@@ -973,15 +1042,20 @@ function exportarCSV(){
 }
 
 async function loadPreceptorasAdmin(){
-  const { data } = await sb.from('preceptoras').select('*').order('ubs');
+  const { data } = await sb.from('preceptoras').select('*, alunos(modulo, ubs)').order('nome');
   const tbody = document.getElementById('tbl-preceptoras');
-  tbody.innerHTML = (data||[]).map(p=>`
+  tbody.innerHTML = (data||[]).map(p=>{
+    const modulos = [...new Set((p.alunos||[]).map(a=>a.modulo))].sort().join(', ') || '—';
+    const ubsList = [...new Set((p.alunos||[]).map(a=>a.ubs))].sort().join(', ') || (p.ubs || '—');
+    return `
     <tr data-id="${p.id}">
       <td>${p.nome}</td>
-      <td>${p.ubs}</td>
+      <td>${ubsList}</td>
+      <td>${modulos}</td>
       <td><input type="email" value="${p.email || ''}" class="prec-email" style="margin:0;"></td>
       <td><button class="btn-sm" onclick="salvarEmailPreceptora('${p.id}')">Salvar</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 window.salvarEmailPreceptora = async function(id){
