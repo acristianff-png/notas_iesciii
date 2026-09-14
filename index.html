@@ -285,6 +285,82 @@
       </div>
     </div>
 
+    <!-- ---------- VISÃO COORDENAÇÃO (papel adicional, escopo por módulo) ---------- -->
+    <div id="coord-view" class="hidden">
+      <div class="card" style="padding:16px 24px; background:linear-gradient(115deg, rgba(229,0,125,0.06), rgba(91,44,134,0.06));">
+        <h2 style="margin:0 0 4px;">Coordenação de módulo</h2>
+        <p class="muted" style="margin:0;">Visão de leitura de todas as preceptoras dos módulos que você coordena — <span id="coord-modulos-label"></span>.</p>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="coord-tab-avaliacoes">Avaliações</button>
+        <button class="tab-btn" data-tab="coord-tab-presencas">Presenças</button>
+        <button class="tab-btn" data-tab="coord-tab-acompanhamento">Acompanhamento</button>
+        <button class="tab-btn" data-tab="coord-tab-rubricas">Rubricas</button>
+      </div>
+
+      <div id="coord-tab-avaliacoes" class="tab-panel active">
+        <div class="card">
+          <div class="toolbar">
+            <h2 style="margin:0;">Avaliações</h2>
+            <button class="btn-sm" id="btn-coord-export-avaliacoes">Exportar CSV</button>
+          </div>
+          <div class="filters">
+            <select id="coord-filtro-modulo"><option value="">Todos os meus módulos</option></select>
+            <select id="coord-filtro-preceptora"><option value="">Todas as preceptoras</option></select>
+          </div>
+          <table id="tbl-coord-avaliacoes">
+            <thead><tr>
+              <th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th>
+              <th>Assid.</th><th>Conh.</th><th>Postura</th><th>Total</th><th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="coord-tab-presencas" class="tab-panel">
+        <div class="card">
+          <div class="toolbar">
+            <h2 style="margin:0;">Presenças</h2>
+            <button class="btn-sm" id="btn-coord-export-presencas">Exportar CSV</button>
+          </div>
+          <table id="tbl-coord-presencas">
+            <thead><tr><th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th><th>Status</th><th>Observação</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="coord-tab-acompanhamento" class="tab-panel">
+        <div class="card">
+          <h2>Acompanhamento das preceptoras</h2>
+          <p class="muted">Relatos semanais e acompanhamento interno das preceptoras dos seus módulos — as
+            notas e observações aqui também ficam privadas (só admin geral e você veem).</p>
+          <div class="filters">
+            <select id="coord-filtro-acomp-preceptora"><option value="">Todas as preceptoras</option></select>
+          </div>
+          <div id="coord-lista-acompanhamento"></div>
+        </div>
+      </div>
+
+      <div id="coord-tab-rubricas" class="tab-panel">
+        <div class="card">
+          <h2>Configurar pontuação das rubricas</h2>
+          <p class="muted">Vale só pros seus módulos. Avaliações já lançadas mantêm a nota registrada no
+            momento do envio — a mudança vale para os próximos lançamentos.</p>
+          <div class="tabs" id="coord-tabs-modulo-rubrica" style="margin-bottom:10px;"></div>
+          <h3>1. Assiduidade</h3>
+          <table><tbody id="coord-rub-assiduidade"></tbody></table>
+          <h3>2. Conhecimentos e Habilidades</h3>
+          <table><tbody id="coord-rub-conhecimentos"></tbody></table>
+          <h3>3. Postura e Colaboração</h3>
+          <table><tbody id="coord-rub-postura"></tbody></table>
+          <button class="btn-primary" style="max-width:220px; margin-top:16px;" id="btn-coord-salvar-rubricas">Salvar rubricas</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ---------- VISÃO ADMIN ---------- -->
     <div id="admin-view" class="hidden">
       <div class="tabs">
@@ -399,6 +475,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let CURRENT_USER = null;
 let IS_ADMIN = false;
 let MY_PRECEPTORA = null;
+let MEUS_MODULOS_COORD = [];
 let RUBRICAS = [];           // todas as linhas da tabela rubricas
 let MEUS_ALUNOS = [];
 let SELECIONADOS = {assiduidade:null, conhecimentos:null, postura:null};
@@ -481,18 +558,29 @@ async function boot(){
 
   await loadRubricas();
 
+  const { data: prec } = await sb.from('preceptoras').select('*').eq('email', CURRENT_USER.email).maybeSingle();
+  const { data: coordRows } = await sb.from('coordenadores_modulo').select('modulo').eq('email', CURRENT_USER.email);
+  MEUS_MODULOS_COORD = (coordRows||[]).map(r=>r.modulo);
+
   if(IS_ADMIN){
     document.getElementById('admin-view').classList.remove('hidden');
     initAdmin();
-  } else {
-    const { data: prec, error } = await sb.from('preceptoras').select('*').eq('email', CURRENT_USER.email).maybeSingle();
-    if(error || !prec){
-      toast("Seu e-mail ainda não está vinculado a nenhuma preceptora. Fale com o administrador.", true);
-      return;
-    }
+  }
+
+  if(prec){
     MY_PRECEPTORA = prec;
     document.getElementById('preceptora-view').classList.remove('hidden');
     initPreceptora();
+  }
+
+  if(MEUS_MODULOS_COORD.length && !IS_ADMIN){
+    document.getElementById('coord-view').classList.remove('hidden');
+    document.getElementById('coord-modulos-label').textContent = MEUS_MODULOS_COORD.join(', ');
+    initCoordenacao();
+  }
+
+  if(!IS_ADMIN && !prec && !MEUS_MODULOS_COORD.length){
+    toast("Seu e-mail ainda não está vinculado a nenhum papel neste sistema. Fale com o administrador.", true);
   }
 }
 
@@ -754,6 +842,229 @@ window.editarAvaliacao = async function(id){
 };
 
 /* ============================================================
+   VISÃO COORDENAÇÃO (papel adicional, escopo por módulo — não é admin)
+   ============================================================ */
+function initCoordenacao(){
+  document.querySelectorAll('#coord-view .tab-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#coord-view .tab-btn').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('#coord-view .tab-panel').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  const selMod = document.getElementById('coord-filtro-modulo');
+  MEUS_MODULOS_COORD.forEach(m => selMod.innerHTML += `<option value="${m}">${m}</option>`);
+  selMod.addEventListener('change', loadCoordAvaliacoes);
+  document.getElementById('coord-filtro-preceptora').addEventListener('change', loadCoordAvaliacoes);
+  document.getElementById('btn-coord-export-avaliacoes').addEventListener('click', ()=>exportarGenericoCSV(window.__COORD_AVALIACOES__, 'avaliacoes'));
+  document.getElementById('btn-coord-export-presencas').addEventListener('click', ()=>exportarGenericoCSV(window.__COORD_PRESENCAS__, 'presencas'));
+
+  loadCoordAvaliacoes();
+  loadCoordPresencas();
+
+  COORD_RUBRICA_MODULO = MEUS_MODULOS_COORD[0];
+  const tabsModulo = document.getElementById('coord-tabs-modulo-rubrica');
+  tabsModulo.innerHTML = MEUS_MODULOS_COORD.map((m,i)=>`<button type="button" class="tab-btn${i===0?' active':''}" data-modulo="${m}">${m}</button>`).join('');
+  tabsModulo.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      tabsModulo.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      COORD_RUBRICA_MODULO = btn.dataset.modulo;
+      renderCoordRubricasEdit();
+    });
+  });
+  renderCoordRubricasEdit();
+  document.getElementById('btn-coord-salvar-rubricas').addEventListener('click', salvarCoordRubricas);
+
+  loadCoordAcompanhamento();
+  document.getElementById('coord-filtro-acomp-preceptora').addEventListener('change', loadCoordAcompanhamento);
+}
+
+let COORD_RUBRICA_MODULO = null;
+
+function renderCoordRubricasEdit(){
+  ['assiduidade','conhecimentos','postura'].forEach(crit=>{
+    const tbody = document.getElementById('coord-rub-' + crit);
+    const rows = RUBRICAS.filter(r=>r.criterio===crit && r.modulo===COORD_RUBRICA_MODULO).sort((a,b)=>a.ordem-b.ordem);
+    tbody.innerHTML = rows.map(r=>`
+      <tr class="rubrica-row" data-id="${r.id}">
+        <td style="width:70%;"><input type="text" value="${r.descricao.replace(/"/g,'&quot;')}" class="rub-desc"></td>
+        <td><input type="number" step="0.5" value="${r.pontos}" class="rub-pts"></td>
+      </tr>`).join('');
+  });
+}
+
+async function salvarCoordRubricas(){
+  const rows = document.querySelectorAll('#coord-tab-rubricas .rubrica-row');
+  for(const row of rows){
+    const { error } = await sb.from('rubricas').update({
+      descricao: row.querySelector('.rub-desc').value,
+      pontos: parseFloat(row.querySelector('.rub-pts').value)
+    }).eq('id', row.dataset.id);
+    if(error){ toast("Erro ao salvar rubrica: " + error.message, true); return; }
+  }
+  toast("Rubricas atualizadas.");
+  await loadRubricas();
+  renderCoordRubricasEdit();
+}
+
+async function loadCoordAcompanhamento(){
+  const { data: relatos, error } = await sb.from('relatos_semanais')
+    .select('*, preceptoras(nome, ubs)')
+    .order('data_referencia', {ascending:false});
+  if(error){ toast("Erro ao carregar relatos: " + error.message, true); return; }
+
+  const doMeusModulos = (relatos||[]).filter(r => MEUS_MODULOS_COORD.includes(r.modulo));
+
+  const { data: acompanhamentos } = await sb.from('acompanhamento_preceptoras').select('*');
+  const mapAcomp = {};
+  (acompanhamentos||[]).forEach(a => mapAcomp[a.preceptora_id + '|' + a.modulo + '|' + a.data_referencia] = a);
+
+  const selPrec = document.getElementById('coord-filtro-acomp-preceptora');
+  if(selPrec.options.length <= 1){
+    new Set(doMeusModulos.map(r=>r.preceptoras?.nome).filter(Boolean))
+      .forEach(p => selPrec.innerHTML += `<option value="${p}">${p}</option>`);
+  }
+  const fPrec = selPrec.value;
+  const filtrados = doMeusModulos.filter(r => !fPrec || r.preceptoras?.nome === fPrec);
+
+  const PERC_LABEL = {5:'Ótima', 4:'Boa', 3:'Regular', 2:'Difícil', 1:'Muito difícil'};
+  const container = document.getElementById('coord-lista-acompanhamento');
+  container.innerHTML = filtrados.map(r=>{
+    const key = r.preceptora_id + '|' + r.modulo + '|' + r.data_referencia;
+    const acomp = mapAcomp[key] || {};
+    return `
+    <div class="relato-card" data-preceptora="${r.preceptora_id}" data-modulo="${r.modulo}" data-data="${r.data_referencia}">
+      <div class="relato-head">
+        <b>${r.preceptoras?.nome ?? ''} · ${r.preceptoras?.ubs ?? ''} · ${r.modulo}</b>
+        <span class="perc">${new Date(r.data_referencia+'T00:00:00').toLocaleDateString('pt-BR')} · Semana: ${PERC_LABEL[r.percepcao_geral] || '—'}</span>
+      </div>
+      <div class="relato-field"><label>O que funcionou bem</label><p>${r.pontos_positivos || '—'}</p></div>
+      <div class="relato-field"><label>Desafios</label><p>${r.desafios || '—'}</p></div>
+      <div class="relato-field"><label>Sugestões</label><p>${r.sugestoes || '—'}</p></div>
+
+      <div class="privado">
+        <span class="tag-privado">Acompanhamento interno (só coordenação vê)</span>
+        <div class="row2">
+          <div>
+            <label>Nota de desempenho (1–5)</label>
+            <select class="acomp-nota">
+              <option value="">—</option>
+              ${[5,4,3,2,1].map(n=>`<option value="${n}" ${acomp.nota_desempenho==n?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div></div>
+        </div>
+        <label>Observação interna</label>
+        <textarea class="acomp-obs" placeholder="Suas anotações sobre o desempenho dela nessa semana...">${acomp.observacao_interna || ''}</textarea>
+        <button class="btn-sm" onclick="salvarAcompanhamento('${r.preceptora_id}', '${r.modulo}', '${r.data_referencia}', this, true)">Salvar</button>
+      </div>
+    </div>`;
+  }).join('') || '<p class="muted">Nenhum relato enviado ainda.</p>';
+}
+
+async function loadCoordAvaliacoes(){
+  const { data, error } = await sb.from('avaliacoes')
+    .select('*, alunos(nome, ubs, modulo), preceptoras(nome)')
+    .order('data_visita', {ascending:false});
+  if(error){ toast("Erro ao carregar avaliações: " + error.message, true); return; }
+
+  const doMeusModulos = (data||[]).filter(a => MEUS_MODULOS_COORD.includes(a.alunos?.modulo));
+
+  const selPrec = document.getElementById('coord-filtro-preceptora');
+  if(selPrec.options.length <= 1){
+    new Set(doMeusModulos.map(a=>a.preceptoras?.nome).filter(Boolean))
+      .forEach(p => selPrec.innerHTML += `<option value="${p}">${p}</option>`);
+  }
+  const fMod = document.getElementById('coord-filtro-modulo').value;
+  const fPrec = selPrec.value;
+  const filtered = doMeusModulos.filter(a => (!fMod || a.alunos?.modulo === fMod) && (!fPrec || a.preceptoras?.nome === fPrec));
+  window.__COORD_AVALIACOES__ = filtered;
+
+  document.querySelector('#tbl-coord-avaliacoes tbody').innerHTML = filtered.map(a=>`
+    <tr>
+      <td>${a.alunos?.modulo ?? ''}</td>
+      <td>${a.alunos?.ubs ?? ''}</td>
+      <td>${a.preceptoras?.nome ?? ''}</td>
+      <td>${a.alunos?.nome ?? ''}</td>
+      <td>${new Date(a.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
+      <td>${fmt(a.assiduidade_pontos)}</td>
+      <td>${fmt(a.conhecimentos_pontos)}</td>
+      <td>${fmt(a.postura_pontos)}</td>
+      <td><span class="badge ok">${fmt(a.nota_total)}</span></td>
+      <td><button class="btn-sm" onclick="coordEditarAvaliacao('${a.id}')">Ajustar</button></td>
+    </tr>`).join('') || '<tr><td colspan="10" class="muted">Nenhuma avaliação nos seus módulos ainda.</td></tr>';
+}
+
+window.coordEditarAvaliacao = async function(id){
+  const a = (window.__COORD_AVALIACOES__ || []).find(x=>x.id===id);
+  if(!a) return;
+  const novaA = prompt(`Assiduidade (${a.alunos?.nome}):`, a.assiduidade_pontos);
+  if(novaA===null) return;
+  const novaC = prompt("Conhecimentos e Habilidades:", a.conhecimentos_pontos);
+  if(novaC===null) return;
+  const novaP = prompt("Postura e Colaboração:", a.postura_pontos);
+  if(novaP===null) return;
+
+  const { error } = await sb.from('avaliacoes').update({
+    assiduidade_pontos: parseFloat(novaA),
+    conhecimentos_pontos: parseFloat(novaC),
+    postura_pontos: parseFloat(novaP)
+  }).eq('id', id);
+
+  if(error){ toast("Erro ao ajustar: " + error.message, true); return; }
+  toast("Avaliação ajustada.");
+  loadCoordAvaliacoes();
+};
+
+async function loadCoordPresencas(){
+  const { data, error } = await sb.from('presencas')
+    .select('*, alunos(nome, ubs, modulo), preceptoras(nome)')
+    .order('data_visita', {ascending:false});
+  if(error){ toast("Erro ao carregar presenças: " + error.message, true); return; }
+
+  const filtered = (data||[]).filter(p => MEUS_MODULOS_COORD.includes(p.alunos?.modulo));
+  window.__COORD_PRESENCAS__ = filtered;
+
+  document.querySelector('#tbl-coord-presencas tbody').innerHTML = filtered.map(p=>`
+    <tr>
+      <td>${p.alunos?.modulo ?? ''}</td>
+      <td>${p.alunos?.ubs ?? ''}</td>
+      <td>${p.preceptoras?.nome ?? ''}</td>
+      <td>${p.alunos?.nome ?? ''}</td>
+      <td>${new Date(p.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
+      <td><span class="badge ${p.status==='presente'?'ok':''}">${STATUS_LABEL[p.status]}</span></td>
+      <td>${p.observacao || ''}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhuma chamada nos seus módulos ainda.</td></tr>';
+}
+
+function exportarGenericoCSV(rows, nomeArquivo){
+  if(!rows || !rows.length){ toast("Nada para exportar.", true); return; }
+  const isAvaliacao = 'assiduidade_pontos' in rows[0];
+  const header = isAvaliacao
+    ? ['Módulo','UBS','Preceptora','Aluno','Data','Assiduidade','Conhecimentos','Postura','Nota Total']
+    : ['Módulo','UBS','Preceptora','Aluno','Data','Status','Observação'];
+  const lines = [header.join(';')];
+  rows.forEach(r=>{
+    const linha = isAvaliacao
+      ? [r.alunos?.modulo, r.alunos?.ubs, r.preceptoras?.nome, r.alunos?.nome,
+         new Date(r.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
+         fmt(r.assiduidade_pontos), fmt(r.conhecimentos_pontos), fmt(r.postura_pontos), fmt(r.nota_total)]
+      : [r.alunos?.modulo, r.alunos?.ubs, r.preceptoras?.nome, r.alunos?.nome,
+         new Date(r.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
+         STATUS_LABEL[r.status], r.observacao || ''];
+    lines.push(linha.join(';'));
+  });
+  const blob = new Blob(["\uFEFF" + lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = `${nomeArquivo}_coordenacao_${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+}
+
+/* ============================================================
    VISÃO ADMIN
    ============================================================ */
 function initAdmin(){
@@ -856,7 +1167,7 @@ async function loadAcompanhamento(){
   }).join('') || '<p class="muted">Nenhum relato enviado ainda.</p>';
 }
 
-window.salvarAcompanhamento = async function(preceptora_id, modulo, data_referencia, btn){
+window.salvarAcompanhamento = async function(preceptora_id, modulo, data_referencia, btn, fromCoord){
   const card = btn.closest('.relato-card');
   const nota = card.querySelector('.acomp-nota').value;
   const obs = card.querySelector('.acomp-obs').value;
@@ -868,6 +1179,7 @@ window.salvarAcompanhamento = async function(preceptora_id, modulo, data_referen
   const { error } = await sb.from('acompanhamento_preceptoras').upsert(payload, { onConflict: 'preceptora_id,modulo,data_referencia' });
   if(error){ toast("Erro ao salvar: " + error.message, true); return; }
   toast("Acompanhamento salvo.");
+  if(fromCoord) loadCoordAcompanhamento();
 };
 
 const STATUS_LABEL = {presente:'Presente', ausente:'Ausente', justificado:'Justificado'};
