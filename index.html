@@ -210,8 +210,13 @@
             <input type="date" id="chamada-data">
           </div>
           <div>
-            <label>Turma esperada nesta data</label>
-            <div id="chamada-turma-label" style="padding:10px 12px; font-weight:700; color:var(--afya-purple);"></div>
+            <label>Turma desta chamada</label>
+            <select id="chamada-turma">
+              <option value="A">Turma A</option>
+              <option value="B">Turma B</option>
+              <option value="TODAS">Todas as turmas</option>
+            </select>
+            <div id="chamada-turma-hint" class="muted" style="margin:-8px 0 10px;"></div>
           </div>
         </div>
         <table>
@@ -219,22 +224,50 @@
           <tbody id="tbl-chamada"></tbody>
         </table>
         <button class="btn-primary" style="max-width:220px; margin-top:14px;" id="btn-salvar-chamada">Salvar chamada</button>
+
+        <details style="margin-top:18px;">
+          <summary class="muted" style="cursor:pointer; font-weight:600;">Alterar a data de uma chamada já lançada</summary>
+          <p class="muted" style="margin:10px 0;">Move as presenças da turma selecionada acima, lançadas na data
+            acima, para outra data — útil quando o calendário mudou e a turma foi em outro dia.</p>
+          <div class="row2">
+            <div>
+              <label>Nova data</label>
+              <input type="date" id="chamada-nova-data">
+            </div>
+            <div style="display:flex; align-items:flex-end;">
+              <button type="button" class="btn-sm" style="margin-bottom:14px;" id="btn-mover-chamada">Mover chamada</button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <div class="card">
         <h2>Lançar avaliação semanal</h2>
         <div class="row2">
           <div>
+            <label>Data da visita</label>
+            <input type="date" id="inp-data-visita">
+          </div>
+          <div>
+            <label>Turma</label>
+            <select id="avaliacao-turma">
+              <option value="A">Turma A</option>
+              <option value="B">Turma B</option>
+              <option value="TODAS">Todas as turmas</option>
+            </select>
+            <div id="avaliacao-turma-hint" class="muted" style="margin:-8px 0 10px;"></div>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
             <label>Aluno(a)</label>
             <select id="sel-aluno"></select>
           </div>
           <div>
-            <label>Data da visita <span id="avaliacao-turma-label" class="muted"></span></label>
-            <input type="date" id="inp-data-visita">
+            <label>Nº da visita (opcional)</label>
+            <input type="number" id="inp-visita-numero" min="1">
           </div>
         </div>
-        <label>Nº da visita (opcional)</label>
-        <input type="number" id="inp-visita-numero" min="1" style="max-width:140px;">
 
         <div id="form-criterios"></div>
 
@@ -326,7 +359,7 @@
             <button class="btn-sm" id="btn-coord-export-presencas">Exportar CSV</button>
           </div>
           <table id="tbl-coord-presencas">
-            <thead><tr><th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th><th>Status</th><th>Observação</th></tr></thead>
+            <thead><tr><th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Turma</th><th>Data</th><th>Status</th><th>Observação</th><th>Alterar data</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -398,7 +431,7 @@
             <select id="filtro-presenca-modulo"><option value="">Todos os módulos</option></select>
           </div>
           <table id="tbl-admin-presencas">
-            <thead><tr><th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Data</th><th>Status</th><th>Observação</th></tr></thead>
+            <thead><tr><th>Módulo</th><th>UBS</th><th>Preceptora</th><th>Aluno</th><th>Turma</th><th>Data</th><th>Status</th><th>Observação</th><th>Alterar data</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -613,9 +646,12 @@ async function initPreceptora(){
   await onModuloChange();
 
   document.getElementById('inp-data-visita').addEventListener('change', renderSelAlunoPorTurma);
+  document.getElementById('avaliacao-turma').addEventListener('change', renderSelAlunoPorTurma);
   document.getElementById('btn-salvar-avaliacao').addEventListener('click', salvarAvaliacao);
   document.getElementById('chamada-data').addEventListener('change', renderChamada);
+  document.getElementById('chamada-turma').addEventListener('change', renderChamada);
   document.getElementById('btn-salvar-chamada').addEventListener('click', salvarChamada);
+  document.getElementById('btn-mover-chamada').addEventListener('click', moverChamada);
   document.getElementById('btn-salvar-relato').addEventListener('click', salvarRelato);
   document.getElementById('relato-data').addEventListener('change', carregarRelato);
 }
@@ -661,14 +697,54 @@ async function salvarRelato(){
   toast("Relato salvo. Obrigado por compartilhar!");
 }
 
-function renderSelAlunoPorTurma(){
+/* ---------- Turma: sugestão pelo calendário + escolha manual ----------
+   A escala quinzenal (grupoParaData) só SUGERE a turma da data. A preceptora
+   pode trocar manualmente (A, B ou Todas) quando o calendário mudou e a turma
+   foi num dia que seria da outra. */
+function turmaSugerida(dataStr){
+  return grupoParaData(dataStr, CURRENT_MODULO);
+}
+
+function alunosPorTurma(turma){
+  return alunosDoModuloAtual().filter(a => turma === 'TODAS' || !a.grupo || a.grupo === turma);
+}
+
+function atualizarHintTurma(hintId, dataStr, turma){
+  const sug = turmaSugerida(dataStr);
+  const el = document.getElementById(hintId);
+  if(!sug){ el.textContent = ''; return; }
+  if(turma === 'TODAS')      el.textContent = `Todas as turmas selecionadas (a escala indicaria a Turma ${sug}).`;
+  else if(turma === sug)     el.textContent = `Conforme a escala do calendário.`;
+  else                       el.textContent = `Fora da escala (o calendário indicaria a Turma ${sug}) — lançamento de remanejamento.`;
+}
+
+// Ao abrir uma data que já tem chamada lançada, volta a turma que foi de fato lançada
+// (assim uma data remanejada reabre com a turma certa, não com a da escala).
+function turmaInferida(existentes, dataStr){
+  const grupos = new Set();
+  (existentes || []).forEach(p => {
+    const al = alunosDoModuloAtual().find(a => a.id === p.aluno_id);
+    if(al && al.grupo) grupos.add(al.grupo);
+  });
+  if(grupos.size === 1) return [...grupos][0];
+  if(grupos.size > 1) return 'TODAS';
+  return turmaSugerida(dataStr) || 'TODAS';
+}
+
+function renderSelAlunoPorTurma(ev){
   const data = document.getElementById('inp-data-visita').value;
-  const grupo = grupoParaData(data, CURRENT_MODULO);
-  document.getElementById('avaliacao-turma-label').textContent = grupo ? `(Turma ${grupo})` : '';
-  const alunosDaTurma = alunosDoModuloAtual().filter(a => !a.grupo || a.grupo === grupo);
+  const selTurma = document.getElementById('avaliacao-turma');
+  const manual = ev && ev.target === selTurma;
+  if(!manual) selTurma.value = turmaSugerida(data) || 'TODAS';
+
+  atualizarHintTurma('avaliacao-turma-hint', data, selTurma.value);
+
   const sel = document.getElementById('sel-aluno');
-  sel.innerHTML = alunosDaTurma.map(a => `<option value="${a.id}">${a.nome}</option>`).join('')
-    || '<option value="">Nenhum aluno desta turma nesta data</option>';
+  const anterior = sel.value;
+  const alunos = alunosPorTurma(selTurma.value);
+  sel.innerHTML = alunos.map(a => `<option value="${a.id}">${a.nome}</option>`).join('')
+    || '<option value="">Nenhum aluno desta turma</option>';
+  if(alunos.some(a => a.id === anterior)) sel.value = anterior;
 }
 
 const PRESENCA_STATUS = [
@@ -678,15 +754,19 @@ const PRESENCA_STATUS = [
 ];
 let CHAMADA_SELECIONADA = {}; // aluno_id -> status
 
-async function renderChamada(){
+async function renderChamada(ev){
   const data = document.getElementById('chamada-data').value;
-  const grupo = grupoParaData(data, CURRENT_MODULO);
-  document.getElementById('chamada-turma-label').textContent = grupo ? `Turma ${grupo}` : '—';
-
-  const alunosDaTurma = alunosDoModuloAtual().filter(a => !a.grupo || a.grupo === grupo);
+  const selTurma = document.getElementById('chamada-turma');
+  const manual = ev && ev.target === selTurma;   // true só quando ela mesma trocou a turma
 
   const { data: existentes } = await sb.from('presencas')
     .select('*').eq('preceptora_id', MY_PRECEPTORA.id).eq('data_visita', data);
+
+  if(!manual) selTurma.value = turmaInferida(existentes, data);
+  const turma = selTurma.value;
+  atualizarHintTurma('chamada-turma-hint', data, turma);
+
+  const alunosDaTurma = alunosPorTurma(turma);
 
   CHAMADA_SELECIONADA = {};
   (existentes||[]).forEach(p => CHAMADA_SELECIONADA[p.aluno_id] = p.status);
@@ -717,14 +797,49 @@ async function renderChamada(){
 
 async function salvarChamada(){
   const data_visita = document.getElementById('chamada-data').value;
-  const rows = Object.entries(CHAMADA_SELECIONADA).map(([aluno_id, status]) => ({
-    aluno_id, preceptora_id: MY_PRECEPTORA.id, data_visita, status
-  }));
+  const turma = document.getElementById('chamada-turma').value;
+  const idsListados = new Set(alunosPorTurma(turma).map(a => a.id));
+
+  // salva só os alunos da turma/módulo exibidos (não mexe em presenças de outros)
+  const rows = Object.entries(CHAMADA_SELECIONADA)
+    .filter(([aluno_id]) => idsListados.has(aluno_id))
+    .map(([aluno_id, status]) => ({ aluno_id, preceptora_id: MY_PRECEPTORA.id, data_visita, status }));
   if(!rows.length){ toast("Marque a presença de pelo menos um aluno.", true); return; }
 
   const { error } = await sb.from('presencas').upsert(rows, { onConflict: 'aluno_id,data_visita' });
   if(error){ toast("Erro ao salvar chamada: " + error.message, true); return; }
   toast("Chamada salva com sucesso.");
+}
+
+// Move para outra data as presenças já lançadas da turma selecionada
+// (ex.: o calendário mudou e a Turma A foi num dia que seria da B).
+async function moverChamada(){
+  const dataOrigem = document.getElementById('chamada-data').value;
+  const dataDestino = document.getElementById('chamada-nova-data').value;
+  if(!dataOrigem || !dataDestino){ toast("Informe a data atual e a nova data.", true); return; }
+  if(dataOrigem === dataDestino){ toast("A nova data é igual à data atual.", true); return; }
+
+  const ids = alunosPorTurma(document.getElementById('chamada-turma').value).map(a => a.id);
+  if(!ids.length){ toast("Nenhum aluno nesta turma.", true); return; }
+
+  const { data: movidas, error } = await sb.from('presencas')
+    .update({ data_visita: dataDestino })
+    .eq('preceptora_id', MY_PRECEPTORA.id).eq('data_visita', dataOrigem).in('aluno_id', ids)
+    .select('id');
+
+  const brDestino = new Date(dataDestino + 'T00:00:00').toLocaleDateString('pt-BR');
+  if(error){
+    toast(error.code === '23505'
+      ? `Já existe presença lançada em ${brDestino} para algum desses alunos. Abra essa data e ajuste por lá.`
+      : "Erro ao mover chamada: " + error.message, true);
+    return;
+  }
+  if(!movidas || !movidas.length){ toast("Não há presenças lançadas nessa data para a turma selecionada.", true); return; }
+
+  toast(`${movidas.length} presença(s) movida(s) para ${brDestino}.`);
+  document.getElementById('chamada-data').value = dataDestino;
+  document.getElementById('chamada-nova-data').value = '';
+  await renderChamada();
 }
 
 function renderCriterioForm(){
@@ -820,7 +935,11 @@ window.editarAvaliacao = async function(id){
   if(!data) return;
   EDITANDO_ID = id;
   document.getElementById('inp-data-visita').value = data.data_visita;
-  renderSelAlunoPorTurma();
+  // abre na turma do aluno (cobre avaliações de turma remanejada)
+  const alunoEd = alunosDoModuloAtual().find(a => a.id === data.aluno_id);
+  const selTurmaEd = document.getElementById('avaliacao-turma');
+  selTurmaEd.value = alunoEd?.grupo || 'TODAS';
+  renderSelAlunoPorTurma({ target: selTurmaEd });
   document.getElementById('sel-aluno').value = data.aluno_id;
   document.getElementById('inp-visita-numero').value = data.visita_numero || '';
 
@@ -1019,9 +1138,37 @@ window.coordEditarAvaliacao = async function(id){
   loadCoordAvaliacoes();
 };
 
+// Turma do aluno + etiqueta "remanejada" quando a data lançada não bate com a escala do calendário
+function turmaDaPresenca(p){
+  const g = p.alunos?.grupo;
+  if(!g) return '—';
+  const esperado = grupoParaData(p.data_visita, p.alunos?.modulo);
+  return (esperado && esperado !== g) ? `${g} (remanejada)` : g;
+}
+
+function celulaAlterarData(p){
+  return `<input type="date" id="nd-${p.id}" value="${p.data_visita}" style="width:auto;margin:0 4px 0 0;padding:4px 6px;">
+          <button class="btn-sm" onclick="alterarDataPresenca('${p.id}', '${p.data_visita}')">Salvar</button>`;
+}
+
+window.alterarDataPresenca = async function(id, dataAtual){
+  const nova = document.getElementById('nd-' + id).value;
+  if(!nova || nova === dataAtual){ toast("Escolha uma data diferente da atual.", true); return; }
+  const { error } = await sb.from('presencas').update({ data_visita: nova }).eq('id', id);
+  if(error){
+    toast(error.code === '23505'
+      ? "Esse aluno já tem presença lançada na nova data."
+      : "Erro ao alterar data: " + error.message, true);
+    return;
+  }
+  toast("Data da presença alterada.");
+  if(document.getElementById('tbl-admin-presencas')?.offsetParent) loadAdminPresencas();
+  if(document.getElementById('tbl-coord-presencas')?.offsetParent) loadCoordPresencas();
+};
+
 async function loadCoordPresencas(){
   const { data, error } = await sb.from('presencas')
-    .select('*, alunos(nome, ubs, modulo), preceptoras(nome)')
+    .select('*, alunos(nome, ubs, modulo, grupo), preceptoras(nome)')
     .order('data_visita', {ascending:false});
   if(error){ toast("Erro ao carregar presenças: " + error.message, true); return; }
 
@@ -1034,10 +1181,12 @@ async function loadCoordPresencas(){
       <td>${p.alunos?.ubs ?? ''}</td>
       <td>${p.preceptoras?.nome ?? ''}</td>
       <td>${p.alunos?.nome ?? ''}</td>
+      <td>${turmaDaPresenca(p)}</td>
       <td>${new Date(p.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
       <td><span class="badge ${p.status==='presente'?'ok':''}">${STATUS_LABEL[p.status]}</span></td>
       <td>${p.observacao || ''}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhuma chamada nos seus módulos ainda.</td></tr>';
+      <td>${celulaAlterarData(p)}</td>
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">Nenhuma chamada nos seus módulos ainda.</td></tr>';
 }
 
 function exportarGenericoCSV(rows, nomeArquivo){
@@ -1045,14 +1194,14 @@ function exportarGenericoCSV(rows, nomeArquivo){
   const isAvaliacao = 'assiduidade_pontos' in rows[0];
   const header = isAvaliacao
     ? ['Módulo','UBS','Preceptora','Aluno','Data','Assiduidade','Conhecimentos','Postura','Nota Total']
-    : ['Módulo','UBS','Preceptora','Aluno','Data','Status','Observação'];
+    : ['Módulo','UBS','Preceptora','Aluno','Turma','Data','Status','Observação'];
   const lines = [header.join(';')];
   rows.forEach(r=>{
     const linha = isAvaliacao
       ? [r.alunos?.modulo, r.alunos?.ubs, r.preceptoras?.nome, r.alunos?.nome,
          new Date(r.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
          fmt(r.assiduidade_pontos), fmt(r.conhecimentos_pontos), fmt(r.postura_pontos), fmt(r.nota_total)]
-      : [r.alunos?.modulo, r.alunos?.ubs, r.preceptoras?.nome, r.alunos?.nome,
+      : [r.alunos?.modulo, r.alunos?.ubs, r.preceptoras?.nome, r.alunos?.nome, turmaDaPresenca(r),
          new Date(r.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
          STATUS_LABEL[r.status], r.observacao || ''];
     lines.push(linha.join(';'));
@@ -1187,7 +1336,7 @@ const STATUS_BADGE = {presente:'ok', ausente:'', justificado:''};
 
 async function loadAdminPresencas(){
   const { data, error } = await sb.from('presencas')
-    .select('*, alunos(nome, ubs, modulo), preceptoras(nome, ubs)')
+    .select('*, alunos(nome, ubs, modulo, grupo), preceptoras(nome, ubs)')
     .order('data_visita', {ascending:false});
   if(error){ toast("Erro ao carregar presenças: " + error.message, true); return; }
 
@@ -1214,20 +1363,22 @@ async function loadAdminPresencas(){
       <td>${p.alunos?.ubs ?? ''}</td>
       <td>${p.preceptoras?.nome ?? ''}</td>
       <td>${p.alunos?.nome ?? ''}</td>
+      <td>${turmaDaPresenca(p)}</td>
       <td>${new Date(p.data_visita+'T00:00:00').toLocaleDateString('pt-BR')}</td>
       <td><span class="badge ${p.status==='presente'?'ok':''}">${STATUS_LABEL[p.status]}</span></td>
       <td>${p.observacao || ''}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhuma chamada lançada ainda.</td></tr>';
+      <td>${celulaAlterarData(p)}</td>
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">Nenhuma chamada lançada ainda.</td></tr>';
 }
 
 function exportarPresencasCSV(){
   const rows = window.__ADMIN_PRESENCAS__ || [];
   if(!rows.length){ toast("Nada para exportar.", true); return; }
-  const header = ['Módulo','UBS','Preceptora','Aluno','Data','Status','Observação'];
+  const header = ['Módulo','UBS','Preceptora','Aluno','Turma','Data','Status','Observação'];
   const lines = [header.join(';')];
   rows.forEach(p=>{
     lines.push([
-      p.alunos?.modulo, p.alunos?.ubs, p.preceptoras?.nome, p.alunos?.nome,
+      p.alunos?.modulo, p.alunos?.ubs, p.preceptoras?.nome, p.alunos?.nome, turmaDaPresenca(p),
       new Date(p.data_visita+'T00:00:00').toLocaleDateString('pt-BR'),
       STATUS_LABEL[p.status], p.observacao || ''
     ].join(';'));
